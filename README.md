@@ -1,99 +1,89 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
-
 # CIT Booker
 
-Campus bus reservations and QR-based boarding verification for Chennai Institute of Technology.
+Campus bus reservations and QR based boarding for Chennai Institute of Technology. The frontend is a static Vite site hosted on GitHub Pages. Supabase provides authentication, Postgres, row level security, and the ESP32 boarding verification function. No always-on Express server is needed.
+
+## Supabase setup
+
+The project already has the initial schema from `supabase/migrations/20261109160000_initial_schema.sql`. In the Supabase dashboard SQL Editor, apply these files in order:
+
+1. `supabase/migrations/20261110103000_pages_backend.sql`
+2. `supabase/seed.sql`
+
+The seed adds the sample routes, buses, staff profiles, today's trips, and the bus identification map. It does not add bookings. Run it once after the schema migration.
+
+In **Authentication → URL Configuration**, set the Site URL to your deployed GitHub Pages URL and add that URL plus `http://localhost:5173/**` to the allowed redirect URLs. For a project site, the deployed URL includes the repository path, for example `https://ACCOUNT.github.io/REPOSITORY/`.
+
+### Enable staff accounts
+
+Students can register and sign in with the email link. Staff must have a Supabase Auth account and a matching seeded profile. Add/ invite staff from **Authentication → Users** using the seeded email address. Then, in the SQL Editor, assign the appropriate role:
+
+```sql
+update public.profiles
+set role = 'admin'
+where email = 'admin@example.invalid';
+
+update public.profiles
+set role = 'driver'
+where email = 'driver-1@example.invalid';
+```
+
+The seed uses reserved `example.invalid` addresses. Replace them with actual authorized staff emails in your own database, or update the seeded profile email to match the account you invite. Repeat for each driver. The profile trigger links the Auth account to the existing profile by email. Never give a staff role to an account the transport office does not control.
 
 ## Run locally
 
-Prerequisite: Node.js 22 or later.
+Copy `.env.example` to `.env.local` and set the project's **Project URL** and **publishable key**. These are browser values; never use a `sb_secret_...` or service-role key in the frontend.
 
 ```sh
 npm ci
 npm run dev
 ```
 
-The local app and its API are served together at `http://localhost:3000`.
+Open the Vite URL shown in the terminal, usually `http://localhost:5173`.
 
-## Deploy the website to GitHub Pages
+## Deploy to GitHub Pages
 
-GitHub Pages hosts the static frontend; it does not run the Express API. To keep
-sign-in, bookings, administration, and boarding verification working, deploy
-the existing Node API separately and keep its `data/cit_booker_db.json` on
-persistent storage.
+1. Push the repository to GitHub and select **GitHub Actions** as the Pages build source.
+2. Under **Settings → Secrets and variables → Actions → Variables**, add:
+   - `VITE_SUPABASE_URL` — Project URL, such as `https://PROJECT_REF.supabase.co`.
+   - `VITE_SUPABASE_PUBLISHABLE_KEY` — the `sb_publishable_...` key.
+   - `VITE_BASE_PATH` only for a custom domain; use `/`. The workflow detects the repository path otherwise.
+3. Run **Deploy to GitHub Pages** or push to `main`.
 
-1. Push this repository to GitHub on the `main` branch.
-2. In **Settings → Pages**, choose **GitHub Actions** as the build and deployment source.
-3. In **Settings → Secrets and variables → Actions → Variables**, add:
-   - `VITE_API_BASE_URL`: the public API URL including `/api`, for example
-     `https://api.example.com/api`.
-   - `VITE_BASE_PATH` (optional): use `/` for a custom domain. Otherwise the
-     workflow uses the repository path automatically.
-4. Configure the API host with `CORS_ORIGINS` set to the Pages origin, such as
-   `https://your-account.github.io` (include the repository path only in the
-   frontend URL; origins do not include paths).
-5. Push to `main` or run **Deploy to GitHub Pages** from the Actions tab.
+The publishable key is included in the public site by design. Row level security and the SQL functions enforce access. Do not add a secret/service-role key to GitHub Actions variables used by the frontend build.
 
-The API host must use HTTPS. The current website still calls the existing
-Express API, which reads `data/cit_booker_db.json`; this must remain available
-until the rest of the API is migrated to Supabase. Do not use ephemeral server
-storage for live bookings.
+## ESP32-CAM boarding verification
 
-## Supabase migration foundation
+The ESP32-CAM decodes the QR locally, then posts the decoded `opaque_qr_identifier` and the selected `trip_id` directly to the Supabase Edge Function. It does not connect to Firebase Realtime Database, and it does not send a camera image.
 
-The Supabase migration and protected ESP32 verification function are in
-`supabase/`. The web app's other API operations have **not** yet been migrated,
-so these files alone do not make a Pages-only deployment functional.
-
-After creating a Supabase project, install the Supabase CLI and run:
+Deploy the function and configure a unique device token and the assigned driver profile ID:
 
 ```sh
-supabase login
-supabase link --project-ref YOUR_PROJECT_REF
-supabase db push
-supabase secrets set ESP32_DEVICE_TOKEN=YOUR_LONG_RANDOM_DEVICE_TOKEN ESP32_DRIVER_ID=YOUR_DRIVER_PROFILE_ID
-supabase functions deploy verify-boarding
+npx supabase login
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase secrets set ESP32_DEVICE_TOKEN=YOUR_LONG_RANDOM_TOKEN ESP32_DRIVER_ID=YOUR_DRIVER_PROFILE_ID
+npx supabase functions deploy verify-boarding
 ```
 
-Set the project URL and public anon/publishable key as GitHub Actions variables
-only after the frontend is migrated to Supabase Auth and its Edge Functions.
-Never put a service-role key in the website or ESP32 firmware.
+The firmware sends an HTTPS request to:
 
-## ESP32-CAM QR verification
-
-The ESP32-CAM should decode the QR locally and POST its decoded text to the
-existing API endpoint. CIT Booker QR codes contain the opaque QR identifier;
-send that value as `qr_identifier` (not the image or a link to the image).
-
-For the current Express API, configure these server-side environment variables
-on its host:
-
-- `ESP32_DEVICE_TOKEN`: a long, unique secret provisioned to the device.
-- `ESP32_DRIVER_ID`: the driver's existing user ID. The driver must be assigned
-  to the trip being scanned.
-
-The Express API device endpoint is:
-
-```http
-POST https://api.example.com/api/boarding/verify
-Authorization: Bearer <ESP32_DEVICE_TOKEN>
-Content-Type: application/json
+```text
+https://YOUR_PROJECT_REF.supabase.co/functions/v1/verify-boarding
 ```
+
+with `Authorization: Bearer YOUR_LONG_RANDOM_TOKEN`, JSON content type, and a body like:
 
 ```json
 {
-  "trip_id": "trip_id_from_the_api",
+  "trip_id": "trip_bus_1",
   "qr_identifier": "CIT-QR-..."
 }
 ```
 
-The Supabase function endpoint, once deployed, is
-`https://YOUR_PROJECT_REF.supabase.co/functions/v1/verify-boarding`; it accepts
-the same JSON body and device bearer token. It checks QR status, booking,
-driver assignment, and duplicate boarding atomically.
+The function responds with `success`, `code`, and `message`; the device can use `success` to control its green/red indicator. The QR identifier is not an access credential for Supabase. Keep the device token only in firmware/device configuration and Supabase secrets, never in the website.
 
-Keep the device token out of the website build and use HTTPS for device
-requests. The current function supports one configured device/driver. The
-remaining application endpoints still require the Express API until migrated.
+## Current features and limitations
+
+- Student email-link login, seat selection, booking, cancellation, and personal QR pass use Supabase Auth and Postgres.
+- Driver browser scans and ESP32 scans share the protected boarding verification logic. Driver manifests refresh from the database.
+- Admin writes use role-checked SQL functions and row level security.
+- Gmail reminder dispatch requires the driver's connected Gmail account; Supabase itself does not send mail unless an email provider is configured.

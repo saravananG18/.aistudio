@@ -4,6 +4,7 @@ name: Deploy to GitHub Pages
   push:
     branches:
       - main
+      - minimal
   workflow_dispatch:
 
 permissions:
@@ -30,18 +31,20 @@ jobs:
         run: npm ci
       - name: Check types
         run: npm run lint
-      - name: Validate API configuration
+      - name: Validate Supabase configuration
         run: |
-          if [ -z "$VITE_API_BASE_URL" ]; then
-            echo "Set the VITE_API_BASE_URL repository variable to the hosted API URL ending in /api." >&2
+          if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in repository Actions variables." >&2
             exit 1
           fi
         env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
       - name: Build website
         run: npm run build
         env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH }}
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

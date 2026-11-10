@@ -7,6 +7,7 @@ import {
   getCachedAccessToken,
   sendBookingConfirmationGmail,
   sendBoardingIntimationGmail,
+  sendBoardingReminderGmail,
   GoogleAuthResult
 } from '../services/gmail.ts';
 
@@ -22,6 +23,7 @@ interface GmailContextType {
   disconnectGmail: () => Promise<void>;
   sendBookingConfirmation: typeof sendBookingConfirmationGmail;
   sendBoardingIntimation: typeof sendBoardingIntimationGmail;
+  sendBoardingReminder: typeof sendBoardingReminderGmail;
 }
 
 const GmailContext = createContext<GmailContextType | undefined>(undefined);
@@ -97,7 +99,8 @@ export const GmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         connectGmail,
         disconnectGmail,
         sendBookingConfirmation: sendBookingConfirmationGmail,
-        sendBoardingIntimation: sendBoardingIntimationGmail
+        sendBoardingIntimation: sendBoardingIntimationGmail,
+        sendBoardingReminder: sendBoardingReminderGmail
       }}
     >
       {children}

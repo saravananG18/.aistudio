@@ -216,7 +216,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onOpenQ
                 )}
 
                 {/* Persona Switcher for Quick Verification */}
-                <div className="hidden lg:flex items-center gap-1 bg-slate-100 rounded-lg p-1 text-xs">
+                {demoUsers.length > 0 && <div className="hidden lg:flex items-center gap-1 bg-slate-100 rounded-lg p-1 text-xs">
                   <span className="text-slate-500 px-2 font-medium">Demo Role:</span>
                   {demoUsers.map(u => (
                     <button
@@ -232,7 +232,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onOpenQ
                       {u.role === 'admin' ? 'Admin' : u.role === 'driver' ? 'Driver' : 'Student'}
                     </button>
                   ))}
-                </div>
+                </div>}
 
                 {/* User Info */}
                 <div className="flex items-center gap-2 pl-2 border-l border-slate-200">

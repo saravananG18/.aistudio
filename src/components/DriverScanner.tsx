@@ -1,16 +1,3 @@
-import { initializeApp, getApps } from 'firebase/app';
-import { getDatabase, ref, onValue, update } from 'firebase/database';
-
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_://firebaseapp.com",
-  databaseURL: "https://YOUR_://firebaseio.com",
-  projectId: "YOUR_PROJECT_ID"
-};
-
-const fbApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-const rtdb = getDatabase(fbApp);
-
 import React, { useState, useEffect, useRef } from 'react';
 import jsQR from 'jsqr';
 import { Trip, BoardingVerificationResult } from '../types/index.ts';
@@ -48,7 +35,7 @@ interface DriverScannerProps {
 
 export const DriverScanner: React.FC<DriverScannerProps> = ({ onOpenBusMap }) => {
   const { user } = useAuth();
-  const { isConnected, googleUser, connectGmail, sendBoardingIntimation } = useGmail();
+  const { isConnected, googleUser, connectGmail, sendBoardingIntimation, sendBoardingReminder } = useGmail();
   const [assignedTrips, setAssignedTrips] = useState<Trip[]>([]);
   const [selectedTripId, setSelectedTripId] = useState<string>('');
   const [manifestData, setManifestData] = useState<any | null>(null);
@@ -80,12 +67,40 @@ export const DriverScanner: React.FC<DriverScannerProps> = ({ onOpenBusMap }) =>
     setIsSendingReminders(true);
     setReminderFeedback(null);
     try {
-      const res = await api.sendTripReminders(selectedTripId, reminderCustomNote);
+      if (unboardedPassengers.length === 0) {
+        setReminderFeedback({ type: 'success', text: 'There are no unboarded passengers to remind.' });
+        return;
+      }
+      if (!isConnected) {
+        const connection = await connectGmail();
+        if (!connection.success) throw new Error(connection.error || 'Connect Gmail to send boarding reminders.');
+      }
+      const trip = manifestData.trip;
+      let sent = 0;
+      let failed = 0;
+      for (const passenger of unboardedPassengers) {
+        const result = await sendBoardingReminder({
+          studentName: passenger.student_name,
+          studentEmail: passenger.student_email,
+          studentIdNumber: passenger.student_id_number,
+          bookingReference: passenger.booking_reference,
+          seatId: passenger.seat_id,
+          busNumber: trip.bus?.bus_number || 'Campus Bus',
+          routeName: trip.route?.name || 'Campus Route',
+          departureTime: trip.departure_time,
+          parkingBay: trip.parking_bay,
+          driverName: user?.name,
+          note: reminderCustomNote
+        });
+        await api.recordDriverEmailLog(passenger.booking_id, result.success ? 'SENT' : 'FAILED', result.error);
+        if (result.success) sent += 1;
+        else failed += 1;
+      }
       setReminderFeedback({
-        type: 'success',
-        text: res.message || `Dispatched departure reminders to ${res.count} unboarded passengers.`
+        type: failed ? (sent ? 'success' : 'error') : 'success',
+        text: `${sent} reminder${sent === 1 ? '' : 's'} sent${failed ? `; ${failed} failed` : ''}.`
       });
-      playSound('success');
+      if (sent) playSound('success');
       // reload manifest to reflect fresh updates
       await loadManifest(selectedTripId);
       setTimeout(() => {
@@ -231,37 +246,7 @@ export const DriverScanner: React.FC<DriverScannerProps> = ({ onOpenBusMap }) =>
   }, [selectedTripId]);
 
 
-    const [espLastScanned, setEspLastScanned] = useState<string | null>(null);
-
-  // Listen for QR codes scanned by the ESP32-CAM via Firebase
-  useEffect(() => {
-    if (scannerMode !== 'camera') return;
-
-    const scanRef = ref(rtdb, 'esp32_scanner/latest_scan');
-    const unsubscribe = onValue(scanRef, async (snapshot) => {
-      const data = snapshot.val();
-      if (!data || data.status !== 'pending' || !data.qrLink) return;
-
-      const rawToken = String(data.qrLink).trim();
-      setEspLastScanned(rawToken);
-
-      // Verify using your existing backend API + Gmail + Sound logic
-      const isValid = await handleVerifyQR(rawToken);
-
-      // Send result back to Firebase so Python triggers Green or Red LED on ESP32-CAM
-      await update(scanRef, {
-        status: isValid ? 'valid' : 'invalid',
-        verifiedAt: Date.now()
-      });
-
-      setTimeout(() => setEspLastScanned(null), 4000);
-    });
-
-    return () => unsubscribe();
-  }, [scannerMode, selectedTripId, isVerifying]);
-
-
-   // Perform backend verification (Updated to return boolean for ESP32 LED)
+  // Browser camera/file scans use the same authenticated verification RPC.
   const handleVerifyQR = async (qrToken: string): Promise<boolean> => {
     if (!selectedTripId || isVerifying) return false;
     setIsVerifying(true);
@@ -622,33 +607,27 @@ export const DriverScanner: React.FC<DriverScannerProps> = ({ onOpenBusMap }) =>
                 Manual Reference
               </button>
             </div>
-                      {/* 1. PASTE THE ESP32-CAM JSX BLOCK HERE */}
           {scannerMode === 'camera' && (
             <div>
               <div className="relative aspect-4/3 bg-slate-900 rounded-2xl overflow-hidden flex flex-col items-center justify-center border border-slate-300 p-6 text-center text-white">
                 <div className="w-16 h-16 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center mb-4 animate-pulse">
                   <QrCode className="w-8 h-8" />
                 </div>
-                <h3 className="text-lg font-semibold">Scan QR using ESP32-CAM</h3>
+                <h3 className="text-lg font-semibold">ESP32-CAM Boarding Scanner</h3>
                 <p className="text-xs text-slate-400 mt-1 max-w-xs">
                   {selectedTripId
-                    ? 'Point passenger QR code at the ESP32-CAM hardware scanner...'
+                    ? 'The device verifies each decoded pass with Supabase and controls its own status indicator. The manifest refreshes automatically.'
                     : 'Please select an assigned trip above before scanning.'}
                 </p>
-                {espLastScanned && (
-                  <p className="mt-3 px-3 py-1.5 rounded-lg bg-slate-800 text-xs text-sky-300 font-mono break-all max-w-full">
-                    Scanned: {espLastScanned}
-                  </p>
-                )}
               </div>
 
               <div className="flex items-center justify-between gap-3 mt-4 text-xs text-slate-600">
                 <span className="flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                  Hardware Scanner: <strong>ESP32-CAM Bridge Active</strong>
+                  Device: <strong>Supabase Edge Function</strong>
                 </span>
                 <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 font-medium">
-                  Auto-Verify Ready
+                  Use HTTPS
                 </span>
               </div>
             </div>

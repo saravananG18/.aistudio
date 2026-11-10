@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Bus, Route, Trip, EmailLog, SystemSettings, BusIdentificationMap, User, DriverAvailability } from '../types/index.ts';
-import { api, API_BASE } from '../services/api.ts';
+import { api } from '../services/api.ts';
 import { appAssetUrl, DEFAULT_BUS_MAP_IMAGE } from '../services/assets.ts';
 import { useAuth } from '../context/AuthContext.tsx';
+import { useGmail } from '../context/GmailContext.tsx';
 import { 
   ShieldAlert, 
   Bus as BusIcon, 
@@ -43,7 +44,8 @@ interface AdminPortalProps {
 }
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({ currentView, onBusMapUpdated, onOpenMapModal }) => {
-  const { user, demoUsers } = useAuth();
+  const { user } = useAuth();
+  const { isConnected, connectGmail, sendBoardingReminder } = useGmail();
   const [activeTab, setActiveTab] = useState<'trips' | 'fleet' | 'routes' | 'bus-map' | 'qr-security' | 'emails' | 'settings'>('trips');
   
   // Data states
@@ -53,6 +55,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentView, onBusMapU
   const [emailLogs, setEmailLogs] = useState<EmailLog[]>([]);
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [studentQrs, setStudentQrs] = useState<any[]>([]);
+  const [allProfiles, setAllProfiles] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -115,6 +118,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentView, onBusMapU
 
       setTrips(tripsRes.trips);
       setStudentQrs(demoRes.active_qrs);
+      setAllProfiles(demoRes.users);
       setEmailLogs(emailsRes.logs);
       setSettings(settingsRes.settings);
 
@@ -313,9 +317,31 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentView, onBusMapU
   const handleSendAdminTripReminders = async (tripId: string) => {
     setSendingReminderTripId(tripId);
     try {
-      const res = await api.sendTripReminders(tripId, 'Campus administration reminder: Bus departure batch is approaching. Please board promptly.');
-      setFeedback({ type: 'success', text: res.message || `Dispatched reminders to ${res.count} unboarded passengers.` });
-      const manifest = await api.getTripManifest(tripId);
+      const manifest = tripManifests[tripId] || await api.getTripManifest(tripId);
+      const pending = manifest.manifest.filter((item: any) => item.boarding_status !== 'BOARDED');
+      if (!pending.length) {
+        setFeedback({ type: 'success', text: 'There are no unboarded passengers to remind.' });
+        return;
+      }
+      if (!isConnected) {
+        const connection = await connectGmail();
+        if (!connection.success) throw new Error(connection.error || 'Connect Gmail to send boarding reminders.');
+      }
+      let sent = 0;
+      let failed = 0;
+      for (const passenger of pending) {
+        const result = await sendBoardingReminder({
+          studentName: passenger.student_name, studentEmail: passenger.student_email,
+          studentIdNumber: passenger.student_id_number, bookingReference: passenger.booking_reference,
+          seatId: passenger.seat_id, busNumber: manifest.trip.bus?.bus_number || 'Campus Bus',
+          routeName: manifest.trip.route?.name || 'Campus Route', departureTime: manifest.trip.departure_time,
+          parkingBay: manifest.trip.parking_bay, driverName: user?.name,
+          note: 'Campus administration reminder: Bus departure is approaching. Please board promptly.'
+        });
+        await api.recordDriverEmailLog(passenger.booking_id, result.success ? 'SENT' : 'FAILED', result.error);
+        if (result.success) sent += 1; else failed += 1;
+      }
+      setFeedback({ type: sent || !pending.length ? 'success' : 'error', text: `${sent} reminders sent${failed ? `; ${failed} failed` : ''}.` });
       setTripManifests(prev => ({ ...prev, [tripId]: manifest }));
       await loadAll();
     } catch (err: any) {
@@ -379,49 +405,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentView, onBusMapU
       return;
     }
     try {
-      // Find two distinct available drivers so 1-driver-1-trip per day is strictly preserved
-      const freeDrivers = driverAvailability
-        .filter(d => !d.is_assigned_today)
-        .map(d => d.driver.id);
-
+      const freeDrivers = driverAvailability.filter(d => !d.is_assigned_today).map(d => d.driver.id);
       const driver1 = newTripDriverId || freeDrivers[0] || undefined;
-      // Second driver must be different from driver1!
       const driver2 = freeDrivers.find(id => id !== driver1) || undefined;
-
-      // Schedule 03:30 PM Batch 1
-      const res1 = await fetch(`${API_BASE}/trips`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user?.id}` },
-        body: JSON.stringify({
-          bus_id: targetBusId,
-          route_id: targetRouteId,
-          assigned_driver_id: driver1,
-          departure_time: '03:30 PM',
-          parking_bay: newTripBay || 'Bay 1 — Main Ground'
-        })
-      });
-      const data1 = await res1.json();
-      if (!res1.ok) throw new Error(data1.error || 'Failed to schedule 03:30 PM batch');
-
-      // Schedule 04:30 PM Batch 2 with separate driver
-      const res2 = await fetch(`${API_BASE}/trips`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user?.id}` },
-        body: JSON.stringify({
-          bus_id: targetBusId,
-          route_id: targetRouteId,
-          assigned_driver_id: driver2,
-          departure_time: '04:30 PM',
-          parking_bay: newTripBay || 'Bay 1 — Main Ground'
-        })
-      });
-      const data2 = await res2.json();
-      if (!res2.ok) throw new Error(data2.error || 'Failed to schedule 04:30 PM batch');
-
-      setFeedback({ 
-        type: 'success', 
-        text: 'Successfully scheduled both 03:30 PM and 04:30 PM departure batches with dedicated distinct drivers assigned for each trip!' 
-      });
+      await api.createTrip({ bus_id: targetBusId, route_id: targetRouteId, assigned_driver_id: driver1, departure_time: '03:30 PM', parking_bay: newTripBay || 'Bay 1 - Main Ground' });
+      await api.createTrip({ bus_id: targetBusId, route_id: targetRouteId, assigned_driver_id: driver2, departure_time: '04:30 PM', parking_bay: newTripBay || 'Bay 1 - Main Ground' });
+      setFeedback({ type: 'success', text: 'Both departure batches were scheduled.' });
       await loadAll();
     } catch (err: any) {
       setFeedback({ type: 'error', text: err.message || 'Failed to schedule batches.' });
@@ -436,50 +425,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentView, onBusMapU
         bus_number: newBusNumber,
         bus_name: newBusName,
         capacity: parseInt(newBusCapacity, 10),
-        parking_bay: newBusParkingBay || `Bay ${(buses.length % 10) + 1} — Campus Ground`
+        parking_bay: newBusParkingBay || 'Campus Ground',
+        departure_time: newBusDepartureBatch === '04:30 PM' ? '04:30 PM' : '03:30 PM',
+        assigned_driver_id: newTripDriverId || undefined
       };
-
       if (newBusRouteOption === 'new' && newBusNewRouteName) {
         payload.new_route_name = newBusNewRouteName;
         payload.new_route_stops = newBusNewRouteStops;
-      } else if (newBusSelectedRouteId) {
-        payload.route_id = newBusSelectedRouteId;
+      } else if (newBusSelectedRouteId) payload.route_id = newBusSelectedRouteId;
+      const data = await api.createBus(payload);
+      if (newBusDepartureBatch === 'BOTH' && data.bus && data.route) {
+        await api.createTrip({ bus_id: data.bus.id, route_id: data.route.id, assigned_driver_id: newTripDriverId || undefined, departure_time: '04:30 PM', parking_bay: payload.parking_bay });
       }
-
-      const initialTime = newBusDepartureBatch === '04:30 PM' ? '04:30 PM' : '03:30 PM';
-      payload.departure_time = initialTime;
-
-      const res = await fetch(`${API_BASE}/buses`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user?.id}`
-        },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to add bus');
-
-      // If Authenticator chose BOTH batches (3:30 PM and 4:30 PM), also schedule the second batch
-      if (newBusDepartureBatch === 'BOTH' && data.bus && (data.route || newBusSelectedRouteId)) {
-        const resolvedRouteId = data.route?.id || newBusSelectedRouteId;
-        await fetch(`${API_BASE}/trips`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user?.id}` },
-          body: JSON.stringify({
-            bus_id: data.bus.id,
-            route_id: resolvedRouteId,
-            assigned_driver_id: newTripDriverId || undefined,
-            departure_time: '04:30 PM',
-            parking_bay: payload.parking_bay
-          })
-        });
-      }
-
-      setFeedback({ 
-        type: 'success', 
-        text: `Bus ${newBusNumber} added successfully with route and departure batch(es)! Students and drivers can now view and book seats.` 
-      });
+      setFeedback({ type: 'success', text: 'Bus and departure batch(es) added to the fleet.' });
       setNewBusNumber('');
       setNewBusName('');
       setNewBusNewRouteName('');
@@ -494,21 +452,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentView, onBusMapU
     e.preventDefault();
     if (!newRouteName || !newRouteStops) return;
     try {
-      const stopsArray = newRouteStops.split(',').map(s => s.trim()).filter(Boolean);
-      const res = await fetch(`${API_BASE}/routes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user?.id}`
-        },
-        body: JSON.stringify({
-          name: newRouteName,
-          ordered_stops: stopsArray
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to add route');
-      setFeedback({ type: 'success', text: `Route "${newRouteName}" created!` });
+      await api.createRoute({ name: newRouteName, ordered_stops: newRouteStops.split(',').map(s => s.trim()).filter(Boolean) });
+      setFeedback({ type: 'success', text: 'Route created.' });
       setNewRouteName('');
       setNewRouteStops('');
       await loadAll();
@@ -521,23 +466,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentView, onBusMapU
     e.preventDefault();
     if (!newTripBusId || !newTripRouteId || !newTripDeparture) return;
     try {
-      const res = await fetch(`${API_BASE}/trips`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user?.id}`
-        },
-        body: JSON.stringify({
-          bus_id: newTripBusId,
-          route_id: newTripRouteId,
-          assigned_driver_id: newTripDriverId,
-          departure_time: newTripDeparture,
-          parking_bay: newTripBay
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to schedule trip');
-      setFeedback({ type: 'success', text: `New trip scheduled at ${newTripDeparture}!` });
+      await api.createTrip({ bus_id: newTripBusId, route_id: newTripRouteId, assigned_driver_id: newTripDriverId, departure_time: newTripDeparture, parking_bay: newTripBay });
+      setFeedback({ type: 'success', text: 'New trip scheduled.' });
       await loadAll();
     } catch (err: any) {
       setFeedback({ type: 'error', text: err.message });
@@ -1632,16 +1562,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentView, onBusMapU
                             onClick={async () => {
                               const routeId = routes.find(r => r.route_number === b.route_number)?.id || routes[0]?.id;
                               if (!routeId) return;
-                              await fetch(`${API_BASE}/trips`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user?.id}` },
-                                body: JSON.stringify({
-                                  bus_id: b.id,
-                                  route_id: routeId,
-                                  departure_time: '03:30 PM',
-                                  parking_bay: `Bay ${(buses.indexOf(b) % 10) + 1} — Campus Ground`
-                                })
-                              });
+                              await api.createTrip({ bus_id: b.id, route_id: routeId, departure_time: '03:30 PM', parking_bay: 'Campus Ground' });
                               setFeedback({ type: 'success', text: `Scheduled 03:30 PM batch for ${b.bus_number}` });
                               await loadAll();
                             }}
@@ -1656,16 +1577,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentView, onBusMapU
                             onClick={async () => {
                               const routeId = routes.find(r => r.route_number === b.route_number)?.id || routes[0]?.id;
                               if (!routeId) return;
-                              await fetch(`${API_BASE}/trips`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user?.id}` },
-                                body: JSON.stringify({
-                                  bus_id: b.id,
-                                  route_id: routeId,
-                                  departure_time: '04:30 PM',
-                                  parking_bay: `Bay ${(buses.indexOf(b) % 10) + 1} — Campus Ground`
-                                })
-                              });
+                              await api.createTrip({ bus_id: b.id, route_id: routeId, departure_time: '04:30 PM', parking_bay: 'Campus Ground' });
                               setFeedback({ type: 'success', text: `Scheduled 04:30 PM batch for ${b.bus_number}` });
                               await loadAll();
                             }}
@@ -1751,7 +1663,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentView, onBusMapU
           </p>
 
           <div className="divide-y divide-slate-100">
-            {demoUsers.filter(u => u.role === 'student').map(student => {
+            {allProfiles.filter(u => u.role === 'student').map(student => {
               const qr = studentQrs.find(q => q.user_id === student.id);
               const isActive = qr && qr.status === 'ACTIVE';
 

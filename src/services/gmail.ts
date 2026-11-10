@@ -422,3 +422,40 @@ export async function sendBoardingIntimationGmail(boardingDetails: {
     return { success: false, error: err.message };
   }
 }
+
+export async function sendBoardingReminderGmail(reminder: {
+  studentName: string;
+  studentEmail: string;
+  studentIdNumber?: string;
+  bookingReference: string;
+  seatId: string;
+  busNumber: string;
+  routeName: string;
+  departureTime: string;
+  parkingBay: string;
+  driverName?: string;
+  note?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[char] || char);
+  const subject = `Boarding reminder: ${reminder.busNumber} departs at ${reminder.departureTime}`;
+  const htmlBody = `
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#0f172a">
+      <div style="background:#1d4ed8;color:#fff;padding:20px;border-radius:14px 14px 0 0">
+        <strong>Campus bus boarding reminder</strong>
+        <div style="font-size:13px;margin-top:5px">Chennai Institute of Technology</div>
+      </div>
+      <div style="padding:20px;border:1px solid #e2e8f0;border-top:0;border-radius:0 0 14px 14px">
+        <p>Hello ${escapeHtml(reminder.studentName)},</p>
+        <p>Your bus is preparing to depart. Please proceed to the boarding bay and show your CIT Booker QR pass.</p>
+        <p><strong>${escapeHtml(reminder.busNumber)}</strong> · ${escapeHtml(reminder.routeName)}<br>
+        Departure: ${escapeHtml(reminder.departureTime)}<br>Bay: ${escapeHtml(reminder.parkingBay)}<br>
+        Seat: ${escapeHtml(reminder.seatId)} · Reference: ${escapeHtml(reminder.bookingReference)}</p>
+        ${reminder.note ? `<p>${escapeHtml(reminder.note)}</p>` : ''}
+        <p style="color:#64748b;font-size:12px">Reminder from ${escapeHtml(reminder.driverName || 'Campus Transport')}.</p>
+      </div>
+    </div>`;
+  const result = await sendGmailMessage({ to: reminder.studentEmail, subject, htmlBody });
+  return result.success ? { success: true } : { success: false, error: result.error };
+}

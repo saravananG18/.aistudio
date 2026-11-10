@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { User, StudentQRIdentity } from '../types/index.ts';
-import { api } from '../services/api.ts';
+import { getSupabase } from '../services/supabase.ts';
 
 export interface RegisteredStudentProfile {
   email: string;
@@ -30,7 +30,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [qrIdentity, setQrIdentity] = useState<StudentQRIdentity | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [demoUsers, setDemoUsers] = useState<User[]>([]);
   const [savedStudent, setSavedStudent] = useState<RegisteredStudentProfile | null>(() => {
     try {
       const stored = localStorage.getItem('cit_registered_student');
@@ -40,107 +39,88 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
-  const loadDemoUsers = async () => {
-    try {
-      const data = await api.getDemoUsers();
-      setDemoUsers(data.users);
-    } catch (err) {
-      console.error('Failed to load demo users:', err);
-    }
-  };
-
-  const refreshUser = async () => {
-    const token = localStorage.getItem('cit_booker_token');
-    if (!token) {
+  const refreshUser = useCallback(async () => {
+    const client = getSupabase();
+    const { data: { user: authUser }, error: authError } = await client.auth.getUser();
+    if (authError || !authUser) {
       setUser(null);
       setQrIdentity(null);
       setIsLoading(false);
       return;
     }
-    try {
-      const data = await api.getMe();
-      setUser(data.user);
-      setQrIdentity(data.qr_identity);
-    } catch {
-      localStorage.removeItem('cit_booker_token');
+    const { data: profile, error } = await client.from('profiles').select('*').eq('auth_user_id', authUser.id).single();
+    if (error || !profile) {
       setUser(null);
       setQrIdentity(null);
-    } finally {
       setIsLoading(false);
+      throw new Error('Your account profile is not ready yet. Confirm your email, then sign in again.');
     }
-  };
-
-  useEffect(() => {
-    loadDemoUsers();
-    refreshUser();
+    setUser(profile as User);
+    if (profile.role === 'student') {
+      const { data: qr } = await client.from('student_qr_identities').select('*')
+        .eq('user_id', profile.id).eq('status', 'ACTIVE').maybeSingle();
+      setQrIdentity(qr as StudentQRIdentity | null);
+    } else {
+      setQrIdentity(null);
+    }
+    if (profile.role === 'student') {
+      const saved = { email: profile.email, name: profile.name, student_id_number: profile.student_id_number };
+      localStorage.setItem('cit_registered_student', JSON.stringify(saved));
+      setSavedStudent(saved);
+    }
+    setIsLoading(false);
   }, []);
 
-  const login = async (email: string, role?: string) => {
-    setIsLoading(true);
+  useEffect(() => {
+    let client;
     try {
-      const res = await api.login(email, role);
-      localStorage.setItem('cit_booker_token', res.token);
-      if (res.user.role === 'student') {
-        const profile: RegisteredStudentProfile = {
-          email: res.user.email,
-          name: res.user.name,
-          student_id_number: res.user.student_id_number
-        };
-        localStorage.setItem('cit_registered_student', JSON.stringify(profile));
-        setSavedStudent(profile);
-      }
-      setUser(res.user);
-      setQrIdentity(res.qr_identity);
-    } finally {
+      client = getSupabase();
+    } catch (error) {
+      console.error(error);
       setIsLoading(false);
+      return;
     }
+    refreshUser().catch((error) => console.error('Could not load account profile:', error));
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+      if (session) window.setTimeout(() => refreshUser().catch(console.error), 0);
+      else {
+        setUser(null);
+        setQrIdentity(null);
+        setIsLoading(false);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [refreshUser]);
+
+  const redirectUrl = `${window.location.origin}${import.meta.env.BASE_URL || '/'}`;
+  const login = async (email: string) => {
+    const { error } = await getSupabase().auth.signInWithOtp({
+      email: email.trim().toLowerCase(),
+      options: { shouldCreateUser: false, emailRedirectTo: redirectUrl }
+    });
+    if (error) throw error;
   };
 
-  const register = async (data: { name: string; email: string; student_id_number?: string; phone?: string }): Promise<{ is_existing?: boolean }> => {
-    setIsLoading(true);
-    try {
-      const res = await api.registerStudent(data);
-      localStorage.setItem('cit_booker_token', res.token);
-      const profile: RegisteredStudentProfile = {
-        email: res.user.email,
-        name: res.user.name,
-        student_id_number: res.user.student_id_number
-      };
-      localStorage.setItem('cit_registered_student', JSON.stringify(profile));
-      setSavedStudent(profile);
-      setUser(res.user);
-      setQrIdentity(res.qr_identity);
-      return { is_existing: (res as any).is_existing };
-    } finally {
-      setIsLoading(false);
-    }
+  const register = async (data: { name: string; email: string; student_id_number?: string; phone?: string }) => {
+    const email = data.email.trim().toLowerCase();
+    const { error } = await getSupabase().auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: true,
+        emailRedirectTo: redirectUrl,
+        data: { name: data.name.trim(), student_id_number: data.student_id_number?.trim(), phone: data.phone?.trim() }
+      }
+    });
+    if (error) throw error;
+    const saved = { email, name: data.name.trim(), student_id_number: data.student_id_number?.trim() };
+    localStorage.setItem('cit_registered_student', JSON.stringify(saved));
+    setSavedStudent(saved);
+    return {};
   };
 
   const directAccessStudent = async () => {
     if (!savedStudent) return;
-    setIsLoading(true);
-    try {
-      await login(savedStudent.email, 'student');
-    } catch (err: any) {
-      console.warn('Direct login failed for saved student, attempting auto-recovery:', err);
-      try {
-        await register({
-          name: savedStudent.name || 'CIT Student',
-          email: savedStudent.email,
-          student_id_number: savedStudent.student_id_number
-        });
-      } catch (regErr) {
-        console.warn('Student auto-recovery registration failed, falling back to Aarav Sharma:', regErr);
-        try {
-          await login('aarav.sharma@citchennai.net', 'student');
-        } catch (demoErr) {
-          clearSavedStudent();
-          throw err;
-        }
-      }
-    } finally {
-      setIsLoading(false);
-    }
+    await login(savedStudent.email);
   };
 
   const clearSavedStudent = () => {
@@ -148,40 +128,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSavedStudent(null);
   };
 
-  const logout = () => {
-    localStorage.removeItem('cit_booker_token');
-    setUser(null);
-    setQrIdentity(null);
-  };
-
-  const verifyEmail = async () => {
-    await api.verifyEmail();
-    await refreshUser();
-  };
-
-  const switchDemoUser = async (userId: string) => {
-    localStorage.setItem('cit_booker_token', userId);
-    await refreshUser();
+  const logout = () => { void getSupabase().auth.signOut(); };
+  const verifyEmail = refreshUser;
+  const switchDemoUser = async (_userId: string) => {
+    throw new Error('Demo sign-in is disabled. Use the secure email sign-in link instead.');
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        qrIdentity,
-        isLoading,
-        demoUsers,
-        savedStudent,
-        login,
-        register,
-        directAccessStudent,
-        clearSavedStudent,
-        logout,
-        verifyEmail,
-        switchDemoUser,
-        refreshUser
-      }}
-    >
+    <AuthContext.Provider value={{
+      user, qrIdentity, isLoading, demoUsers: [], savedStudent, login, register,
+      directAccessStudent, clearSavedStudent, logout, verifyEmail, switchDemoUser, refreshUser
+    }}>
       {children}
     </AuthContext.Provider>
   );
@@ -189,8 +146,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };

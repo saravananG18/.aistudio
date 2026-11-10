@@ -7,7 +7,7 @@ interface LandingPageProps {
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
-  const { login, register, demoUsers, switchDemoUser, savedStudent, directAccessStudent, clearSavedStudent } = useAuth();
+  const { login, register, savedStudent, directAccessStudent, clearSavedStudent } = useAuth();
   const [activeModal, setActiveModal] = useState<'student-auth' | 'staff-login' | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
 
@@ -25,7 +25,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
     setError(null);
     try {
       await directAccessStudent();
-      setActiveModal(null);
+      setActiveModal('student-auth');
+      setAuthMode('login');
+      setSuccessNotice('A secure sign-in link was sent to your saved email address.');
     } catch (err: any) {
       console.error('Direct access failed:', err);
       setError(err?.message || 'Unable to direct access student account. Please sign in or register.');
@@ -48,10 +50,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
           setIsSubmitting(false);
           return;
         }
-        const res = await register({ name, email, student_id_number: studentId, phone });
-        if (res.is_existing) {
-          setSuccessNotice('Account already registered! Directly accessing your student account...');
-        }
+        await register({ name, email, student_id_number: studentId, phone });
+        setSuccessNotice('Check your inbox for a secure sign-in link. Your account will be ready after you open it.');
       } else {
         if (!email) {
           setError('Email is required.');
@@ -59,8 +59,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
           return;
         }
         await login(email, 'student');
+        setSuccessNotice('Check your inbox for a secure sign-in link.');
       }
-      setActiveModal(null);
     } catch (err: any) {
       setError(err.message || 'Authentication error.');
     } finally {
@@ -78,8 +78,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
         setIsSubmitting(false);
         return;
       }
-      await login(email); // Server validates if role is driver/admin
-      setActiveModal(null);
+      await login(email); // Role is read from the protected Supabase profile.
+      setSuccessNotice('If this email belongs to an enabled staff account, a secure sign-in link is on its way.');
     } catch (err: any) {
       setError(err.message || 'Staff login failed. Check email or permissions.');
     } finally {
@@ -259,6 +259,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
               onClick={() => {
                 setActiveModal('staff-login');
                 setError(null);
+                setSuccessNotice(null);
               }}
               className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm transition-colors shadow-xs"
             >
@@ -269,35 +270,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
 
         </div>
 
-        {/* Demo Persona Quick-Access Bar (For immediate testing) */}
+        {/* Secure sign-in information */}
         <div className="bg-slate-100/80 border border-slate-200/80 rounded-xl p-4 max-w-3xl mx-auto">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+              <Lock className="w-4 h-4 text-blue-600 shrink-0" />
               <span className="text-xs font-semibold text-slate-800">
-                1-Click Demonstration Accounts:
+                Secure email sign-in
               </span>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => switchDemoUser('usr_student_1')}
-                className="px-3 py-1.5 text-xs font-medium bg-white text-slate-800 rounded-lg border border-slate-200 hover:border-blue-400 hover:text-blue-600 shadow-2xs transition-colors"
-              >
-                Aarav (Student)
-              </button>
-              <button
-                onClick={() => switchDemoUser('usr_driver_1')}
-                className="px-3 py-1.5 text-xs font-medium bg-white text-slate-800 rounded-lg border border-slate-200 hover:border-blue-400 hover:text-blue-600 shadow-2xs transition-colors"
-              >
-                Muthukumar (Driver)
-              </button>
-              <button
-                onClick={() => switchDemoUser('usr_admin_1')}
-                className="px-3 py-1.5 text-xs font-medium bg-white text-slate-800 rounded-lg border border-slate-200 hover:border-blue-400 hover:text-blue-600 shadow-2xs transition-colors"
-              >
-                Dr. Sundaramoorthy (Admin)
-              </button>
-            </div>
+            <span className="text-xs text-slate-600">Students can register by email. Staff access must be enabled by the transport administrator.</span>
           </div>
         </div>
 
@@ -391,13 +373,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
                 <input
                   type="email"
                   required
-                  placeholder="e.g. aarav.sharma@citchennai.net"
+                  placeholder="student@your-campus.edu"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Demo mode accepts any valid email (or use test student: <code className="text-blue-600">aarav.sharma@citchennai.net</code>).
+                  We’ll send a secure sign-in link to this email address.
                 </p>
               </div>
 
@@ -408,7 +390,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
                   </label>
                   <input
                     type="tel"
-                    placeholder="+91 98940 12345"
+                    placeholder="+91 9XXXXXXXXX"
                     value={phone}
                     onChange={e => setPhone(e.target.value)}
                     className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -488,6 +470,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
               </div>
             )}
 
+            {successNotice && (
+              <div className="mb-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
+                {successNotice}
+              </div>
+            )}
+
             <form onSubmit={handleStaffSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -496,7 +484,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
                 <input
                   type="email"
                   required
-                  placeholder="e.g. driver.muthu@citchennai.net or transport@citchennai.net"
+                  placeholder="staff@your-campus.edu"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -504,10 +492,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
               </div>
 
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
-                <span className="font-semibold block text-slate-700">Pre-authorized Staff Accounts:</span>
-                <div>• Driver: <code className="text-blue-600">driver.muthu@citchennai.net</code> (Bus 1)</div>
-                <div>• Driver: <code className="text-blue-600">driver.selvam@citchennai.net</code> (Bus 53)</div>
-                <div>• Admin: <code className="text-blue-600">transport@citchennai.net</code></div>
+                <span className="font-semibold block text-slate-700">Staff account access</span>
+                <div>Only email addresses enabled by the transport administrator can sign in here.</div>
               </div>
 
               <button

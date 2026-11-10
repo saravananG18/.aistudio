@@ -47,7 +47,7 @@ export const BusIdentificationMapModal: React.FC<BusIdentificationMapModalProps>
         effective_date: new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }),
         updated_at: new Date().toISOString(),
         updated_by_name: 'Campus Transport Authenticator',
-        updated_by_email: 'transport@citchennai.net',
+        updated_by_email: 'admin@example.invalid',
         notes: 'Official campus parking bay layout and bus identification numbers. Reminder: Route numbers are used as bus numbers.',
         version: 1
       };
