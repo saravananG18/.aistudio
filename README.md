@@ -15,7 +15,7 @@ In **Authentication → URL Configuration**, set the Site URL to your deployed G
 
 ### Enable staff accounts
 
-Students can register and sign in with the email link. Staff must have a Supabase Auth account and a matching seeded profile. Add/ invite staff from **Authentication → Users** using the seeded email address. Then, in the SQL Editor, assign the appropriate role:
+Students register with their name, email, student roll number, and password, then sign in with email and password. If Supabase email confirmation is enabled, new students must confirm their address once before password sign-in works. Staff must have a Supabase Auth account with a password and a matching seeded profile. Create the staff Auth accounts from **Authentication → Users**, set their passwords, and assign the appropriate role in the SQL Editor:
 
 ```sql
 update public.profiles

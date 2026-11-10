@@ -7,7 +7,7 @@ interface LandingPageProps {
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
-  const { login, register, savedStudent, directAccessStudent, clearSavedStudent } = useAuth();
+  const { login, register, savedStudent, clearSavedStudent } = useAuth();
   const [activeModal, setActiveModal] = useState<'student-auth' | 'staff-login' | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
 
@@ -15,27 +15,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [studentId, setStudentId] = useState('');
-  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
-  const handleDirectAccess = async () => {
-    setIsSubmitting(true);
+  const handleDirectAccess = () => {
+    setEmail(savedStudent?.email || '');
+    setActiveModal('student-auth');
+    setAuthMode('login');
     setError(null);
-    try {
-      await directAccessStudent();
-      setActiveModal('student-auth');
-      setAuthMode('login');
-      setSuccessNotice('A secure sign-in link was sent to your saved email address.');
-    } catch (err: any) {
-      console.error('Direct access failed:', err);
-      setError(err?.message || 'Unable to direct access student account. Please sign in or register.');
-      setActiveModal('student-auth');
-      setAuthMode('login');
-    } finally {
-      setIsSubmitting(false);
-    }
+    setSuccessNotice('Enter your password to sign in.');
   };
 
   const handleStudentSubmit = async (e: React.FormEvent) => {
@@ -45,21 +36,28 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
     setIsSubmitting(true);
     try {
       if (authMode === 'register') {
-        if (!name || !email) {
-          setError('Full Name and Email are required.');
+        if (!name.trim() || !email.trim() || !studentId.trim() || !password) {
+          setError('Full Name, Email, Student Roll Number, and Password are required.');
           setIsSubmitting(false);
           return;
         }
-        await register({ name, email, student_id_number: studentId, phone });
-        setSuccessNotice('Check your inbox for a secure sign-in link. Your account will be ready after you open it.');
+        if (password.length < 8) throw new Error('Password must be at least 8 characters long.');
+        if (password !== confirmPassword) throw new Error('Passwords do not match.');
+        const result = await register({ name, email, student_id_number: studentId, password });
+        setSuccessNotice(result.needsEmailConfirmation
+          ? 'Account created. Confirm your email once, then sign in with your password.'
+          : 'Account created. You can now sign in with your email and password.');
+        setAuthMode('login');
+        setPassword('');
+        setConfirmPassword('');
       } else {
-        if (!email) {
-          setError('Email is required.');
+        if (!email.trim() || !password) {
+          setError('Email and password are required.');
           setIsSubmitting(false);
           return;
         }
-        await login(email, 'student');
-        setSuccessNotice('Check your inbox for a secure sign-in link.');
+        await login(email, password);
+        setSuccessNotice('Signed in successfully.');
       }
     } catch (err: any) {
       setError(err.message || 'Authentication error.');
@@ -73,13 +71,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
     setError(null);
     setIsSubmitting(true);
     try {
-      if (!email) {
-        setError('Staff email is required.');
+      if (!email.trim() || !password) {
+        setError('Staff email and password are required.');
         setIsSubmitting(false);
         return;
       }
-      await login(email); // Role is read from the protected Supabase profile.
-      setSuccessNotice('If this email belongs to an enabled staff account, a secure sign-in link is on its way.');
+      await login(email, password); // Role is read from the protected Supabase profile.
+      setSuccessNotice('Signed in successfully.');
     } catch (err: any) {
       setError(err.message || 'Staff login failed. Check email or permissions.');
     } finally {
@@ -121,7 +119,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
           </div>
         )}
 
-        {/* Direct Access Banner for Registered Students */}
+        {/* Saved account quick sign-in banner */}
         {savedStudent && (
           <div className="max-w-3xl mx-auto mb-8 bg-linear-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-5 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -132,7 +130,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold uppercase tracking-wider text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-md">
-                      Registered Student • Direct Access
+                      Registered Student • Quick Sign In
                     </span>
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                   </div>
@@ -151,7 +149,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
                   disabled={isSubmitting}
                   className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold transition-colors shadow-xs flex items-center gap-2 whitespace-nowrap cursor-pointer"
                 >
-                  <span>{isSubmitting ? 'Accessing...' : 'Direct Access'}</span>
+                  <span>Sign In</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
                 <button
@@ -190,7 +188,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Direct account access without repeating registration</span>
+                  <span>Quick sign-in with your saved email and password</span>
                 </li>
               </ul>
             </div>
@@ -201,7 +199,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
                   disabled={isSubmitting}
                   className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition-colors shadow-xs"
                 >
-                  <span>Direct Access as {savedStudent.name.split(' ')[0]}</span>
+                  <span>Sign in as {savedStudent.name.split(' ')[0]}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
                 <button
@@ -276,10 +274,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
             <div className="flex items-center gap-2">
               <Lock className="w-4 h-4 text-blue-600 shrink-0" />
               <span className="text-xs font-semibold text-slate-800">
-                Secure email sign-in
+                Secure password sign-in
               </span>
             </div>
-            <span className="text-xs text-slate-600">Students can register by email. Staff access must be enabled by the transport administrator.</span>
+            <span className="text-xs text-slate-600">Students register with their roll number. Staff access must be enabled by the transport administrator.</span>
           </div>
         </div>
 
@@ -317,8 +315,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
             {savedStudent && (
               <div className="mb-4 p-3 rounded-xl bg-blue-50/80 border border-blue-200 text-xs">
                 <div className="font-semibold text-blue-900 mb-1 flex items-center justify-between">
-                  <span>Registered Student Found</span>
-                  <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">DIRECT ACCESS</span>
+                  <span>Saved Student Account</span>
+                  <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">QUICK SIGN IN</span>
                 </div>
                 <p className="text-slate-600 text-[11px] mb-2">
                   {savedStudent.name} ({savedStudent.email})
@@ -329,7 +327,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
                   disabled={isSubmitting}
                   className="w-full py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                 >
-                  <span>{isSubmitting ? 'Accessing...' : `Direct Access to ${savedStudent.name.split(' ')[0]}'s Account`}</span>
+                  <span>Sign in as {savedStudent.name.split(' ')[0]}</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -353,10 +351,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Student Roll / ID Number
+                  Student Roll Number *
                     </label>
                     <input
                       type="text"
+                      required
                       placeholder="e.g. 22CIT042"
                       value={studentId}
                       onChange={e => setStudentId(e.target.value)}
@@ -378,23 +377,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
                   onChange={e => setEmail(e.target.value)}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  We’ll send a secure sign-in link to this email address.
-                </p>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Password *</label>
+                <input type="password" required minLength={8} autoComplete={authMode === 'register' ? 'new-password' : 'current-password'} placeholder={authMode === 'register' ? 'At least 8 characters' : 'Enter your password'} value={password} onChange={e => setPassword(e.target.value)} className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
               {authMode === 'register' && (
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Mobile Phone Number (Optional)
-                  </label>
-                  <input
-                    type="tel"
-                    placeholder="+91 9XXXXXXXXX"
-                    value={phone}
-                    onChange={e => setPhone(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Confirm Password *</label>
+                  <input type="password" required minLength={8} autoComplete="new-password" placeholder="Re-enter your password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               )}
 
@@ -479,7 +471,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
             <form onSubmit={handleStaffSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Staff Email Address
+                  Staff Email Address *
                 </label>
                 <input
                   type="email"
@@ -491,9 +483,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectRole }) => {
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Password *</label>
+                <input type="password" required autoComplete="current-password" placeholder="Enter your staff password" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-900" />
+              </div>
+
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
                 <span className="font-semibold block text-slate-700">Staff account access</span>
-                <div>Only email addresses enabled by the transport administrator can sign in here.</div>
+                <div>Only staff accounts enabled by the transport administrator can sign in here.</div>
               </div>
 
               <button

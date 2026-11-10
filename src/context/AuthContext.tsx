@@ -14,9 +14,8 @@ interface AuthContextType {
   isLoading: boolean;
   demoUsers: User[];
   savedStudent: RegisteredStudentProfile | null;
-  login: (email: string, role?: string) => Promise<void>;
-  register: (data: { name: string; email: string; student_id_number?: string; phone?: string }) => Promise<{ is_existing?: boolean }>;
-  directAccessStudent: () => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  register: (data: { name: string; email: string; student_id_number: string; password: string }) => Promise<{ needsEmailConfirmation: boolean }>;
   clearSavedStudent: () => void;
   logout: () => void;
   verifyEmail: () => Promise<void>;
@@ -53,7 +52,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
       setQrIdentity(null);
       setIsLoading(false);
-      throw new Error('Your account profile is not ready yet. Confirm your email, then sign in again.');
+      throw new Error('Your account profile is not ready yet. If email confirmation is enabled, confirm your address and sign in again.');
     }
     setUser(profile as User);
     if (profile.role === 'student') {
@@ -93,34 +92,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [refreshUser]);
 
   const redirectUrl = `${window.location.origin}${import.meta.env.BASE_URL || '/'}`;
-  const login = async (email: string) => {
-    const { error } = await getSupabase().auth.signInWithOtp({
+  const login = async (email: string, password: string) => {
+    const { error } = await getSupabase().auth.signInWithPassword({
       email: email.trim().toLowerCase(),
-      options: { shouldCreateUser: false, emailRedirectTo: redirectUrl }
+      password
     });
     if (error) throw error;
   };
 
-  const register = async (data: { name: string; email: string; student_id_number?: string; phone?: string }) => {
+  const register = async (data: { name: string; email: string; student_id_number: string; password: string }) => {
     const email = data.email.trim().toLowerCase();
-    const { error } = await getSupabase().auth.signInWithOtp({
+    const { data: authData, error } = await getSupabase().auth.signUp({
       email,
+      password: data.password,
       options: {
-        shouldCreateUser: true,
         emailRedirectTo: redirectUrl,
-        data: { name: data.name.trim(), student_id_number: data.student_id_number?.trim(), phone: data.phone?.trim() }
+        data: { name: data.name.trim(), student_id_number: data.student_id_number.trim() }
       }
     });
     if (error) throw error;
-    const saved = { email, name: data.name.trim(), student_id_number: data.student_id_number?.trim() };
+    const saved = { email, name: data.name.trim(), student_id_number: data.student_id_number.trim() };
     localStorage.setItem('cit_registered_student', JSON.stringify(saved));
     setSavedStudent(saved);
-    return {};
-  };
-
-  const directAccessStudent = async () => {
-    if (!savedStudent) return;
-    await login(savedStudent.email);
+    return { needsEmailConfirmation: !authData.session };
   };
 
   const clearSavedStudent = () => {
@@ -131,13 +125,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = () => { void getSupabase().auth.signOut(); };
   const verifyEmail = refreshUser;
   const switchDemoUser = async (_userId: string) => {
-    throw new Error('Demo sign-in is disabled. Use the secure email sign-in link instead.');
+    throw new Error('Demo sign-in is disabled. Sign in with your email and password.');
   };
 
   return (
     <AuthContext.Provider value={{
       user, qrIdentity, isLoading, demoUsers: [], savedStudent, login, register,
-      directAccessStudent, clearSavedStudent, logout, verifyEmail, switchDemoUser, refreshUser
+      clearSavedStudent, logout, verifyEmail, switchDemoUser, refreshUser
     }}>
       {children}
     </AuthContext.Provider>

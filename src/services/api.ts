@@ -55,22 +55,23 @@ class ApiService {
     return { user: user as User, qr_identity };
   }
 
-  async registerStudent(data: { name: string; email: string; student_id_number?: string; phone?: string }): Promise<any> {
-    const { error } = await client().auth.signInWithOtp({
+  async registerStudent(data: { name: string; email: string; student_id_number: string; password: string }): Promise<any> {
+    const { error } = await client().auth.signUp({
       email: data.email.trim().toLowerCase(),
-      options: { shouldCreateUser: true, emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL || '/'}`, data }
+      password: data.password,
+      options: { emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL || '/'}`, data: { name: data.name, student_id_number: data.student_id_number } }
     });
     fail(error);
-    return { message: 'Check your email for a secure sign-in link.' };
+    return { message: 'Account created. Sign in with your email and password.' };
   }
 
-  async login(email: string): Promise<any> {
-    const { error } = await client().auth.signInWithOtp({
+  async login(email: string, password: string): Promise<any> {
+    const { error } = await client().auth.signInWithPassword({
       email: email.trim().toLowerCase(),
-      options: { shouldCreateUser: false, emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL || '/'}` }
+      password
     });
     fail(error);
-    return { message: 'If the account is enabled, a sign-in link has been sent.' };
+    return { message: 'Signed in successfully.' };
   }
 
   async verifyEmail(): Promise<{ success: boolean; message: string }> { return { success: true, message: 'Email verified by Supabase Auth.' }; }
