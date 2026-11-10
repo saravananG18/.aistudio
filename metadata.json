@@ -1,0 +1,6 @@
+{
+  "name": "CIT Booker — Chennai Institute of Technology Bus Booking System",
+  "description": "Campus bus reservation and QR-based boarding verification system for Chennai Institute of Technology (CIT Chennai) with authentic routes and boarding stops.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,4 @@
+project_id = "cit-booker"
+
+[functions.verify-boarding]
+verify_jwt = false
