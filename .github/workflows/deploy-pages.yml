@@ -34,17 +34,17 @@ jobs:
       - name: Validate Supabase configuration
         run: |
           if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_PUBLISHABLE_KEY" ]; then
-            echo "Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in repository Actions variables." >&2
+            echo "Set the Supabase URL and publishable key in this workflow." >&2
             exit 1
           fi
         env:
-          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_SUPABASE_URL: "https://tkuevhfdfrjuexeuotjd.supabase.co"
+          VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_jL0l0lPKlR5bDeMjXihU3Q_jDXnih6z"
       - name: Build website
         run: npm run build
         env:
-          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_SUPABASE_URL: "https://tkuevhfdfrjuexeuotjd.supabase.co"
+          VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_jL0l0lPKlR5bDeMjXihU3Q_jDXnih6z"
           VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH }}
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

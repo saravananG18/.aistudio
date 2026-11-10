@@ -42,15 +42,11 @@ Open the Vite URL shown in the terminal, usually `http://localhost:5173`.
 
 ## Deploy to GitHub Pages
 
-1. Push the repository to GitHub and select **GitHub Actions** as the Pages build source.
-2. Under **Settings → Secrets and variables → Actions → Variables**, add:
-   - `VITE_SUPABASE_URL` — Project URL, such as `https://PROJECT_REF.supabase.co`.
-   - `VITE_SUPABASE_PUBLISHABLE_KEY` — the `sb_publishable_...` key.
-   - `VITE_BASE_PATH` only for a custom domain; use `/`. The workflow detects the repository path otherwise.
-3. Run **Deploy to GitHub Pages** or push to `main`.
+1. Select **GitHub Actions** as the Pages build source under repository **Settings → Pages**.
+2. Push to the `minimal` branch (or run **Deploy to GitHub Pages** from the Actions tab).
+3. Configure Supabase Auth's Site URL and allowed redirect URLs for the published Pages address.
 
-The publishable key is included in the public site by design. Row level security and the SQL functions enforce access. Do not add a secret/service-role key to GitHub Actions variables used by the frontend build.
-
+The workflow includes the Supabase project URL and publishable key. The publishable key is public by design; database access is protected by row level security. Never put a Supabase secret or service-role key in the website or workflow.
 ## ESP32-CAM boarding verification
 
 The ESP32-CAM decodes the QR locally, then posts the decoded `opaque_qr_identifier` and the selected `trip_id` directly to the Supabase Edge Function. It does not connect to Firebase Realtime Database, and it does not send a camera image.
